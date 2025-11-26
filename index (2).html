@@ -1,0 +1,429 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Plain Control</title>
+<style>
+  :root{
+    --bg:#70c5ce;
+    --ground:#ded895;
+    --panel: rgba(255,255,255,0.95);
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;
+  }
+  html,body{height:100%;margin:0;background:linear-gradient(#9be7f0,#70c5ce);display:flex;align-items:center;justify-content:center}
+  .app {
+    width:100%;
+    max-width:420px;
+    margin:20px;
+    position:relative;
+  }
+  header {
+    display:flex;
+    justify-content:space-between;
+    align-items:center;
+    gap:.5rem;
+    margin-bottom:8px;
+  }
+  header h1{font-size:1.05rem;margin:0;color:#045;letter-spacing:.6px}
+  header nav button{background:transparent;border:0;padding:6px 8px;border-radius:8px;cursor:pointer;font-weight:600}
+  canvas{display:block;width:100%;background:linear-gradient(#9be7f0,#70c5ce);border-radius:10px;box-shadow:0 6px 24px rgba(2,30,40,0.18);touch-action:none}
+  .info {
+    display:flex;
+    justify-content:space-between;
+    margin-top:8px;
+    gap:.5rem;
+  }
+  .panel {
+    background:var(--panel);
+    padding:8px 10px;
+    border-radius:10px;
+    box-shadow:0 4px 12px rgba(2,30,40,0.06);
+    font-size:0.9rem;
+    color:#0a3845;
+    display:flex;
+    align-items:center;
+    gap:.5rem;
+  }
+  .center {
+    position:absolute;
+    left:50%; top:50%;
+    transform:translate(-50%,-50%);
+    text-align:center;
+    width:85%;
+    pointer-events:none;
+  }
+  .center .big {font-size:1.4rem;font-weight:800;color:#043;pointer-events:auto}
+  .overlay {
+    position:fixed; inset:0; display:none;
+    align-items:center; justify-content:center; background:rgba(4,10,12,0.35); z-index:40;
+  }
+  .modal {
+    background:white; padding:16px; border-radius:12px; width:320px; max-width:90%;
+  }
+  .modal h2{margin:0 0 8px 0}
+  .modal button{margin-top:12px;padding:8px 10px;border-radius:8px;border:0;background:#0a84ff;color:white;cursor:pointer}
+  footer {font-size:0.8rem; color:rgba(0,0,0,0.6);margin-top:10px;text-align:center}
+  @media (max-width:420px){ header h1{font-size:0.95rem} }
+</style>
+</head>
+<body>
+<div class="app" role="application" aria-label="Plain Control">
+  <header>
+    <h1>Plain Control</h1>
+    <nav>
+      <button id="btn-leader">Leaderboard</button>
+      <button id="btn-about">About</button>
+    </nav>
+  </header>
+
+  <canvas id="game" width="480" height="640" aria-label="Plain Control game"></canvas>
+
+  <div class="info">
+    <div class="panel">Score: <span id="score">0</span></div>
+    <div class="panel">Best: <span id="best">0</span></div>
+  </div>
+
+  <div class="center" id="startPanel">
+    <div class="big">Tap / Click / Space — Fly the plane!</div>
+    <div style="font-size:.85rem;margin-top:8px;color:rgba(0,0,0,0.55)">Avoid the pipes — Earn points by passing each pipe</div>
+  </div>
+
+  <div class="center" id="gameOverPanel" style="display:none;pointer-events:auto">
+    <div class="big" id="go-title">Game Over</div>
+    <div style="margin-top:6px" id="go-score"></div>
+    <div style="margin-top:10px">
+      <button id="btn-restart" style="padding:8px 12px;border-radius:8px;border:0;background:#00b894;color:white;cursor:pointer">Play Again</button>
+    </div>
+  </div>
+
+  <footer>Made with ❤️ — Local leaderboard (saved in browser)</footer>
+</div>
+
+<!-- Leaderboard / About overlays -->
+<div class="overlay" id="overlay">
+  <div class="modal" role="dialog" aria-modal="true">
+    <h2 id="overlay-title">Leaderboard</h2>
+    <div id="overlay-body"></div>
+    <div style="display:flex;gap:8px;justify-content:flex-end">
+      <button id="overlay-close">Close</button>
+    </div>
+  </div>
+</div>
+
+<script>
+(() => {
+  const canvas = document.getElementById('game');
+  const ctx = canvas.getContext('2d');
+  const W = canvas.width;
+  const H = canvas.height;
+
+  const startPanel = document.getElementById('startPanel');
+  const gameOverPanel = document.getElementById('gameOverPanel');
+  const goScoreText = document.getElementById('go-score');
+  const scoreEl = document.getElementById('score');
+  const bestEl = document.getElementById('best');
+
+  const overlay = document.getElementById('overlay');
+  const overlayTitle = document.getElementById('overlay-title');
+  const overlayBody = document.getElementById('overlay-body');
+  document.getElementById('btn-leader').addEventListener('click', showLeaderboard);
+  document.getElementById('btn-about').addEventListener('click', showAbout);
+  document.getElementById('overlay-close').addEventListener('click', () => overlay.style.display='none');
+
+  const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  function beeper(freq, time=0.06, type='sine'){ 
+    const o=audioCtx.createOscillator(); 
+    const g=audioCtx.createGain(); 
+    o.type=type; 
+    o.frequency.value=freq; 
+    o.connect(g); 
+    g.connect(audioCtx.destination); 
+    g.gain.value=0.06; 
+    o.start(); 
+    g.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime+time); 
+    setTimeout(()=>o.stop(), (time+0.02)*1000); 
+  }
+
+  let frames = 0;
+  let score = 0;
+  let best = Number(localStorage.getItem('plain_control_best')||0);
+  bestEl.textContent = best;
+  let running = false;
+  let pipes = [];
+  let plane;
+  const GRAV = 0.45;
+  const JUMP = -8.4;
+  const PIPE_GAP = 150;
+  const PIPE_W = 72;
+  const PIPE_INTERVAL = 120;
+
+  function resetGame(){
+    frames = 0;
+    score = 0;
+    pipes = [];
+    plane = {
+      x: W*0.25,
+      y: H/2,
+      vy: 0,
+      w: 48,
+      h: 20,
+      angle: 0,
+      propAngle: 0
+    };
+    scoreEl.textContent = 0;
+    gameOverPanel.style.display = 'none';
+    startPanel.style.display = 'flex';
+  }
+
+  function spawnPipe(){
+    const topH = 50 + Math.random()*(H - 220);
+    pipes.push({
+      x: W + 10,
+      top: topH,
+      bottom: topH + PIPE_GAP,
+      passed: false
+    });
+  }
+
+  function flap(){
+    if (!running) startGame();
+    plane.vy = JUMP;
+    beeper(420,0.06,'triangle');
+  }
+
+  function startGame(){
+    running = true;
+    startPanel.style.display = 'none';
+  }
+
+  function endGame(){
+    running = false;
+    beeper(120,0.15,'sawtooth');
+    gameOverPanel.style.display = 'block';
+    goScoreText.innerHTML = `<div style="font-weight:700">${score} points</div>`;
+    saveScore(score);
+    best = Number(localStorage.getItem('plain_control_best')||0);
+    bestEl.textContent = best;
+  }
+
+  function rectsCollide(a,b){
+    return a.x < b.x + b.w && a.x + a.w > b.x &&
+           a.y < b.y + b.h && a.y + a.h > b.y;
+  }
+
+  function update(){
+    frames++;
+    if (running){
+      plane.vy += GRAV;
+      plane.y += plane.vy;
+      plane.angle = Math.max(-0.7, Math.min(1.2, plane.vy/8));
+      plane.propAngle += 0.6;
+
+      if (frames % PIPE_INTERVAL === 0) spawnPipe();
+
+      for (let p of pipes){
+        p.x -= 2.7;
+        if (!p.passed && p.x + PIPE_W < plane.x){
+          p.passed = true;
+          score++;
+          scoreEl.textContent = score;
+          beeper(880,0.06,'sine');
+        }
+      }
+
+      pipes = pipes.filter(p => p.x + PIPE_W > -10);
+
+      if (plane.y + plane.h/2 >= H - 60 || plane.y - plane.h/2 <= 0){
+        endGame();
+      }
+
+      for (let p of pipes){
+        const topRect = {x:p.x, y:0, w:PIPE_W, h:p.top};
+        const bottomRect = {x:p.x, y:p.bottom, w:PIPE_W, h:H - p.bottom - 60};
+        const planeRect = {x:plane.x - plane.w/2, y:plane.y - plane.h/2, w: plane.w, h: plane.h};
+        if (rectsCollide(planeRect, topRect) || rectsCollide(planeRect, bottomRect)){
+          endGame();
+          break;
+        }
+      }
+    } else {
+      plane.y += Math.sin(frames/12)*0.4;
+      plane.propAngle += 0.4;
+    }
+  }
+
+  function draw(){
+    ctx.clearRect(0,0,W,H);
+    const g = ctx.createLinearGradient(0,0,0,H);
+    g.addColorStop(0,'#9be7f0');
+    g.addColorStop(1,'#70c5ce');
+    ctx.fillStyle = g;
+    ctx.fillRect(0,0,W,H);
+
+    for (let p of pipes){
+      ctx.fillStyle = '#4ec0a2';
+      roundRect(ctx,p.x,0,PIPE_W,p.top,6,true,false);
+      roundRect(ctx,p.x,p.bottom,PIPE_W,H - p.bottom - 60,6,true,false);
+      ctx.fillStyle = 'rgba(0,0,0,0.05)';
+      ctx.fillRect(p.x+12, 0, 6, p.top);
+      ctx.fillRect(p.x+12, p.bottom, 6, H - p.bottom - 60);
+    }
+
+    ctx.fillStyle = '#ded895';
+    ctx.fillRect(0,H-60,W,60);
+    ctx.fillStyle='rgba(0,0,0,0.025)';
+    for(let i=0;i<30;i++) ctx.fillRect(i*24,H-60 + (i%2?6:2),18,6);
+
+    ctx.save();
+    ctx.translate(plane.x, plane.y);
+    ctx.rotate(plane.angle);
+
+    ctx.fillStyle = '#ff6b6b';
+    roundRect(ctx, -plane.w/2, -plane.h/2, plane.w, plane.h, 6, true, false);
+
+    ctx.fillStyle = '#a3e4ff';
+    ctx.beginPath();
+    ctx.ellipse(6, -4, 8, 6, 0, 0, Math.PI*2);
+    ctx.fill();
+
+    ctx.fillStyle = '#ff4757';
+    ctx.beginPath();
+    ctx.moveTo(-6,0);
+    ctx.lineTo(-26, -10);
+    ctx.lineTo(-26, 10);
+    ctx.closePath();
+    ctx.fill();
+
+    ctx.fillStyle = '#ff4757';
+    ctx.beginPath();
+    ctx.moveTo(14, -4);
+    ctx.lineTo(24, -10);
+    ctx.lineTo(24, -2);
+    ctx.closePath();
+    ctx.fill();
+
+    ctx.fillStyle = '#ff4757';
+    ctx.beginPath();
+    ctx.moveTo(-plane.w/2 + 6, -plane.h/2);
+    ctx.lineTo(-plane.w/2 + 6, -plane.h/2 - 12);
+    ctx.lineTo(-plane.w/2 + 18, -plane.h/2);
+    ctx.closePath();
+    ctx.fill();
+
+    ctx.save();
+    ctx.translate(-plane.w/2 - 6, 0);
+    ctx.rotate(plane.propAngle);
+    ctx.fillStyle = '#222';
+    ctx.fillRect(-2,-14,4,28);
+    ctx.fillRect(-14,-2,28,4);
+    ctx.restore();
+
+    ctx.restore();
+
+    ctx.font = '700 48px system-ui, Arial';
+    ctx.fillStyle = 'rgba(255,255,255,0.95)';
+    ctx.textAlign = 'center';
+    ctx.fillText(String(score), W/2, 80);
+  }
+
+  function loop(){
+    update();
+    draw();
+    requestAnimationFrame(loop);
+  }
+
+  function roundRect(ctx, x, y, w, h, r, fill, stroke) {
+    if (typeof stroke === 'undefined') stroke = true;
+    if (typeof r === 'undefined') r = 5;
+    ctx.beginPath();
+    ctx.moveTo(x+r, y);
+    ctx.arcTo(x+w, y, x+w, y+h, r);
+    ctx.arcTo(x+w, y+h, x, y+h, r);
+    ctx.arcTo(x, y+h, x, y, r);
+    ctx.arcTo(x, y, x+w, y, r);
+    ctx.closePath();
+    if (fill) ctx.fill();
+    if (stroke) ctx.stroke();
+  }
+
+  window.addEventListener('keydown', (e) => {
+    if (e.code === 'Space') {
+      e.preventDefault();
+      flap();
+    }
+    if (e.key === 'r' && !running) {
+      restart();
+    }
+  });
+
+  canvas.addEventListener('pointerdown', (e) => {
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+    flap();
+  });
+
+  document.getElementById('btn-restart').addEventListener('click', () => {
+    restart();
+  });
+
+  function restart(){
+    resetGame();
+    running = false;
+    startPanel.style.display = 'flex';
+    gameOverPanel.style.display = 'none';
+    scoreEl.textContent = 0;
+  }
+
+  function getScores(){
+    return JSON.parse(localStorage.getItem('plain_control_scores') || '[]');
+  }
+
+  function saveScore(s){
+    const scores = getScores();
+    const name = prompt('Enter your name for the leaderboard (max 12):', 'Player') || 'Player';
+    const entry = {name: String(name).slice(0,12), score: s, date: (new Date()).toISOString()};
+    scores.push(entry);
+    scores.sort((a,b)=>b.score - a.score);
+    localStorage.setItem('plain_control_scores', JSON.stringify(scores.slice(0,10)));
+    const old = Number(localStorage.getItem('plain_control_best')||0);
+    if (s > old) localStorage.setItem('plain_control_best', String(s));
+  }
+
+  function showLeaderboard(){
+    overlayTitle.textContent = 'Leaderboard';
+    const scores = getScores();
+    if (!scores.length){ 
+      overlayBody.innerHTML = '<div>No scores yet — play to add your name!</div>'; 
+      overlay.style.display='flex'; 
+      return; 
+    }
+    let html = '<ol style="padding-left:18px;margin:6px 0">';
+    for (let s of scores){
+      const d = new Date(s.date);
+      html += `<li style="margin:8px 0"><strong>${escapeHtml(s.name)}</strong> — ${s.score} <div style="font-size:.8rem;color:#666">${d.toLocaleString()}</div></li>`;
+    }
+    html += '</ol>';
+    overlayBody.innerHTML = html;
+    overlay.style.display='flex';
+  }
+
+  function showAbout(){
+    overlayTitle.textContent = 'About';
+    overlayBody.innerHTML = '<p>Plain Control — a Flappy-style plane game. Tap / click / press Space to fly. Scores are saved locally in your browser.</p>';
+    overlay.style.display='flex';
+  }
+
+  function escapeHtml(s){ 
+    return String(s).replace(/[&<>"']/g, c => ({
+      '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
+    }[c]));
+  }
+
+  resetGame();
+  loop();
+  bestEl.textContent = localStorage.getItem('plain_control_best') || 0;
+
+})();
+</script>
+</body>
+</html>
