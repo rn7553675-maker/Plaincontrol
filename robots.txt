@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://rn7553675-maker.github.io/Plaincontrol/sitemap.xml
