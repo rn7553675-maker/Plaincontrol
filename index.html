@@ -9,6 +9,8 @@
 <meta name="description" content="Play Plain Control — a fast and fun plane flying game. Avoid obstacles, collect points, and set your high score. Play free online without download.">
 
 <meta name="keywords" content="plane game, flying game, plain control, online plane game, free browser game, html5 game">
+
+<script type='text/javascript' src='//pl28150087.effectivegatecpm.com/5a/3e/aa/5a3eaa400f0e021d014a359efcfc0cfd.js'></script>
 <style>  
   :root{  
     --bg:#70c5ce;  
@@ -408,6 +410,17 @@
   }  
   
   function showLeaderboard(){  
+    // ****** এখানে Popunder ট্রিগার করার জন্য কোড যুক্ত করা হলো ******
+    // এটি একটি কৃত্রিম ক্লিক ট্রিগার করার চেষ্টা করবে, যা Popunder অ্যাডকে সক্রিয় করবে।
+    // যেহেতু Popunder স্ক্রিপ্টটি প্রথম ক্লিকেই ট্রিগার হয়, তাই এই ক্লিকটি ব্যবহার করা হলো।
+    if(typeof window.popTriggered === 'undefined' || window.popTriggered < 2) {
+        // একটি dummy ক্লিক ট্রিগার করে অ্যাড লোড করার চেষ্টা করা হচ্ছে
+        const fakeClick = new MouseEvent('click', { bubbles: true });
+        document.body.dispatchEvent(fakeClick); 
+        window.popTriggered = (window.popTriggered || 0) + 1; // অতিরিক্ত ট্রিগার এড়াতে গণনা
+    }
+    // *************************************************************
+
     overlayTitle.textContent = 'Leaderboard';  
     const scores = getScores();  
     if (!scores.length){   
@@ -443,4 +456,5 @@
   
 })();  
 </script>  </body>  
-  </html>
+	  </html>
+	
